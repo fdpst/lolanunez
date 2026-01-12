@@ -175,11 +175,11 @@ const isDeleteDialogVisible = ref(false);
 
 const fetchUsers = async () => {
     try {
-        const response = await $api_app("/getusuarios", {
+        const response = await $api("/get-users", {
             method: "GET",
             params: {
                 search: searchQuery.value,
-                itemsPerPage: itemsPerPage.value,
+                per_page: itemsPerPage.value,
                 page: page.value,
                 sortBy: sortBy.value,
                 orderBy: orderBy.value

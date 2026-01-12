@@ -14,8 +14,43 @@ use Str;
 class UserController extends Controller
 {
   public function getUsers(Request $request){
-    $users = User::orderBy('created_at', 'DESC')->paginate(20);
-    return response()->json($users, 200);
+    $itemsPerPage = $request->per_page ?? 20;
+    $sortBy = $request->sortBy ?? 'created_at';
+    $orderBy = $request->orderBy ?? 'desc';
+
+    $users = User::query();
+
+    // Búsqueda por nombre o email
+    if($request->search){
+      $search = "%".$request->search."%";
+      $users->where(function($query) use ($search){
+        $query->where('name','Like',$search);
+        $query->orWhere('email','Like',$search);
+      });
+    }
+
+    $users = $users->orderBy($sortBy, $orderBy);
+    $total = $users->count();
+
+    if($itemsPerPage == -1){
+      $usersData = $users->get();
+      return response()->json([
+        "data" => $usersData,
+        "total" => $total,
+        "current_page" => 1,
+        "per_page" => $total,
+        "last_page" => 1
+      ], 200);
+    }else{
+      $usersPaginated = $users->paginate($itemsPerPage);
+      return response()->json([
+        "data" => $usersPaginated->items(),
+        "total" => $total,
+        "current_page" => $usersPaginated->currentPage(),
+        "per_page" => $itemsPerPage,
+        "last_page" => $usersPaginated->lastPage()
+      ], 200);
+    }
   }
 
   public function getUser($user_id){
