@@ -97,7 +97,7 @@
                             <VRow>
                                 <!-- Servicios -->
                                 <VCol cols="12" md="10">
-                                    <VAutocomplete label="Servicios" v-model="evento.servicios" :items="props.servicios" item-title="nombre" return-object multiple chips @update:modelValue="buscarDisponible" />
+                                    <VAutocomplete label="Servicios" v-model="evento.servicios" :items="local_servicios" item-title="nombre" return-object multiple chips @update:modelValue="buscarDisponible" />
                                 </VCol>
                                 <VCol cols="12" md="2">
                                     <VTextField v-model="evento.precio" label="Precio" :rules="[numberValidator]"></VTextField>
@@ -148,8 +148,8 @@
                                 >cerrar</VBtn
                             > -->
                             <VBtn v-if="evento.id" rounded depressed @click="openDeleteDialog" class="mr-2">eliminar</VBtn>
-                            <VBtn v-if="evento.id" rounded @click="confirmarCita" outlined :color="evento.confirmada ? 'grey' : 'success'" class="mr-2">
-                                {{ evento.confirmada? "Desconfirmar": "Confirmar" }}
+                            <VBtn v-if="evento.id" rounded @click="confirmarCita" outlined :color="(evento.confirmada == 1 || evento.confirmada === true) ? 'grey' : 'success'" class="mr-2">
+                                {{ (evento.confirmada == 1 || evento.confirmada === true) ? "Desconfirmar" : "Confirmar" }}
                             </VBtn>
                             <VBtn v-if="evento.id" class="white--text mr-2" rounded @click="generarFactura" outlined :color="'green'">Generar Factura</VBtn>
                         </VCol>
@@ -160,7 +160,7 @@
                     <VRow>
                         <!-- Calendario y boton buscar disponible -->
                         <VCol cols="12" md="6" class="my-1 py-1">
-                            <AppDateTimePicker v-model="evento.fecha" label="Fecha" placeholder="Selecciona una fecha" :config="{ inline: true }" @update:modelValue="buscarDisponible" />
+                            <AppDateTimePicker v-model="evento.fecha" label="Fecha" placeholder="Selecciona una fecha" :config="{ inline: true, locale: Spanish, firstDayOfWeek: 1, dateFormat: 'Y-m-d', altFormat: 'd-m-Y', altInput: true }" @update:modelValue="buscarDisponible" />
                         </VCol>
                         <!-- DIV Seccion citas disponibles empleado y dialogos-->
                         <VCol cols="12" md="5" class="pt-0">
@@ -214,6 +214,10 @@
     } from "@store/state"
 
     const store = useStateStore()
+
+    import {
+        Spanish
+    } from "flatpickr/dist/l10n/es.js"
 
     import {
         EventBus
@@ -287,7 +291,12 @@
     const evento = ref({
         id: null,
         app_empleado_id: null,
-        fecha: null
+        fecha: null,
+        servicios: [],
+        precio: 0,
+        duracion: 0,
+        start: null,
+        end: null
     })
 
     const usuario = ref({});
@@ -309,10 +318,18 @@
     });
 
     const local_empleados = ref([])
+    const local_servicios = ref([])
     const local_horario = ref([])
     const nuevo = ref("nuevo")
     const horas = ref(null)
     const editable = ref(false)
+
+    // Validator para números (acepta decimales)
+    const numberValidator = (value) => {
+        if (!value) return true
+        const num = Number(value)
+        return (!isNaN(num) && isFinite(num)) || 'Debe ser un número válido'
+    }
 
     const filtrar_horas_reales = computed(() => {
         return [];
@@ -573,8 +590,21 @@
             const response = await $api_app(`/confirmar-cita/${evento.value.id}`, {
                 method: "GET",
             })
+            // Actualizar el estado local con la respuesta del servidor
+            // La respuesta viene directamente con confirmada como booleano o 1/0
+            if (response && response.confirmada !== undefined) {
+                // Convertir a 1 o 0 para mantener consistencia con el formato usado en el componente
+                evento.value.confirmada = response.confirmada ? 1 : 0
+            } else if (response && response.data && response.data.confirmada !== undefined) {
+                evento.value.confirmada = response.data.confirmada ? 1 : 0
+            }
+            // Emitir evento para refrescar la lista de citas
+            emit('updatecitas')
+            // Mostrar mensaje de éxito
+            store.success('Estado de la cita actualizado')
         } catch (error) {
-            console.log(error)
+            console.error('Error confirmando cita:', error)
+            store.error('Error al actualizar el estado de la cita')
         }
     }
 
@@ -593,7 +623,13 @@
         isAppointmentDialogVisible.value = false
     })
 
-    EventBus.on('open_form', (data) => {
+    EventBus.on('open_form', async (data) => {
+        // Si no hay servicios, intentar cargarlos
+        if (!props.servicios || props.servicios.length === 0) {
+            // Emitir evento para que el padre cargue los datos
+            emit('refresh');
+        }
+        
         if (data.id) {
             parseEvent(data)
             buscarDisponible()
@@ -601,31 +637,49 @@
             evento.value.fecha = data.fecha
             evento.value.app_empleado_id = data.app_empleado_id
             evento.value.start = `${data.fecha} ${data.intervalo}`
+            // Asegurar que servicios esté inicializado
+            if (!evento.value.servicios) {
+                evento.value.servicios = []
+            }
         }
         isAppointmentDialogVisible.value = true
     })
 
-    watch(() => {
-        if (props.isDialogOpen != null) {
-            isAppointmentDialogVisible.value = props.isDialogOpen;
+    watch(() => props.isDialogOpen, (newVal) => {
+        if (newVal != null) {
+            isAppointmentDialogVisible.value = newVal;
         }
+    });
 
-        if (props.item != null) {
-            evento.value = JSON.parse(JSON.stringify(props.item));
+    watch(() => props.item, (newVal) => {
+        if (newVal != null) {
+            evento.value = JSON.parse(JSON.stringify(newVal));
         }
+    }, { deep: true });
 
-        if (props.user != null) {
-            usuario.value = JSON.parse(JSON.stringify(props.user));
+    watch(() => props.user, (newVal) => {
+        if (newVal != null) {
+            usuario.value = JSON.parse(JSON.stringify(newVal));
         }
+    }, { deep: true });
 
-        if (props.empleados != null) {
-            local_empleados.value = JSON.parse(JSON.stringify(props.empleados));
+    watch(() => props.empleados, (newVal) => {
+        if (newVal != null && Array.isArray(newVal)) {
+            local_empleados.value = JSON.parse(JSON.stringify(newVal));
             local_empleados.value.unshift({
                 id: null,
                 nombre: "Selecciona un empleado"
             });
         }
-    });
+    }, { deep: true });
+
+    watch(() => props.servicios, (newVal) => {
+        if (newVal != null && Array.isArray(newVal)) {
+            local_servicios.value = JSON.parse(JSON.stringify(newVal));
+        } else {
+            local_servicios.value = [];
+        }
+    }, { deep: true, immediate: true });
 
     watch(() => evento.value.servicios, (n) => {
         if (n.length > 0) {

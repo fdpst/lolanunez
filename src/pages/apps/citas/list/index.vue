@@ -70,7 +70,7 @@
             </VCardText>
         </VCard>
 
-        <AppointmentDialog v-model:isDialogOpen="dialogocita" :item="evento" :app_tienda_id="tienda" :empleados="empleados" :servicios="servicios" :clientes="clientes" :user="usuario" @save="saveCita" @updatecitas="refresh"
+        <AppointmentDialog v-model:isDialogOpen="dialogocita" :item="evento" :app_tienda_id="tienda" :empleados="empleados" :servicios="servicios || []" :clientes="clientes" :user="usuario" @save="saveCita" @updatecitas="refresh"
           @generar_factura="generarFactura" @refresh="updateClients" />
         <dialogLoader />
     </section>
@@ -121,7 +121,8 @@
         clientes,
         servicios,
         getTiendas,
-        getData
+        getData,
+        getServicios
     } = useDataMixin()
 
     const tipo = ref(null);
@@ -176,7 +177,13 @@
     });
 
     const map_horario = computed(() => {
-        let horarios = empleados.value.flatMap(empleado => empleado.horario);
+        let horarios = empleados.value.flatMap(empleado => {
+            // Asegurarse de que el horario tenga el app_empleado_id correcto
+            return (empleado.horario || []).map(h => ({
+                ...h,
+                app_empleado_id: h.app_empleado_id || empleado.id
+            }));
+        });
         const map = {};
         horarios.forEach(x => {
             let ref = `${x.app_empleado_id}_${x.dia}`;
@@ -250,11 +257,13 @@
         dia_actual.value = moment(dia_actual.value).add(add, 'days').format('YYYY-MM-DD')
     }
 
-    onMounted(() => {
+    onMounted(async () => {
         (overlay.value = false), calcularIntervalos();
-        getTiendas();
+        await getTiendas();
         // tipo.value = route.query.tipo;
         tipo.value = "peluqueria";
+        // Cargar servicios al inicio
+        await getServicios();
     });
 
     const refresh = () => agregarCitas(dia_actual.value)
@@ -295,7 +304,7 @@
         // y verificamos que el id del horario del empleado sea de la tienda seleccionada
         if (empleado.fecha.length == 0) {
             horario_especial = this.map_horario[
-                `${empleado.id}_${moment(dia).weekday()}`
+                `${empleado.id}_${moment(dia).day()}`
             ];
         }
         // si tiene horario especifico asignamos la entrada y salida de este dia actual ( especifico )
@@ -330,7 +339,7 @@
                         horarioEspecifico.push({
                             app_empleado_id: empleado.id,
                             app_tienda_id: especifico.app_tienda_id,
-                            dia: moment(dia).weekday(),
+                            dia: moment(dia).day(),
                             entrada: especifico.entrada,
                             salida: especifico.salida
                         });
@@ -347,7 +356,7 @@
                         //añadimos a horario habitual e indicamos a true el diahabitual
                         diaHabitual = true;
                         horarioHabitual = this.map_horario[
-                            `${empleado.id}_${moment(dia).weekday()}`
+                            `${empleado.id}_${moment(dia).day()}`
                         ];
                         //}
                     }
@@ -404,8 +413,19 @@
         let actual = moment(`${dia}`, "YYYY-MM-DD");
         let fecha_revision = moment("2021-11-15", "YYYY-MM-DD");
 
-        if (empleado.fecha.length == 0) {
-            horario_especial = map_horario.value[`${empleado.id}_${moment(dia).weekday()}`];
+
+        if (!empleado.fecha || empleado.fecha.length == 0) {
+            // Usar day() en lugar de weekday() para que coincida con el formato del backend (domingo=0, lunes=1, etc.)
+            const diaSemana = moment(dia).day();
+            const ref = `${empleado.id}_${diaSemana}`;
+            const horariosEncontrados = map_horario.value[ref];
+            
+            // Si hay horarios, devolver el array completo (el componente espera un array)
+            if (horariosEncontrados && horariosEncontrados.length > 0) {
+                horario_especial = horariosEncontrados;
+            } else {
+                horario_especial = undefined;
+            }
         }
         // si tiene horario especifico asignamos la entrada y salida de este dia actual ( especifico )
         else {
@@ -439,7 +459,7 @@
                         horarioEspecifico.push({
                             app_empleado_id: empleado.id,
                             app_tienda_id: especifico.app_tienda_id,
-                            dia: moment(dia).weekday(),
+                            dia: moment(dia).day(),
                             entrada: especifico.entrada,
                             salida: especifico.salida
                         });
@@ -455,8 +475,9 @@
                         //diaHabitual = true
                         //añadimos a horario habitual e indicamos a true el diahabitual
                         diaHabitual = true;
-                        horarioHabitual =
-                            map_horario[`${empleado.id}_${moment(dia).weekday()}`];
+                        // Usar day() en lugar de weekday() y map_horario.value
+                        const diaSemana = moment(dia).day();
+                        horarioHabitual = map_horario.value[`${empleado.id}_${diaSemana}`];
                         //}
                     }
                 } else {
@@ -479,26 +500,22 @@
 
         // Comprobamos si el empleado tiene vacaciones ( variable fecha del array en crearIntervalos(n, dia_actual))
         // si no tiene vacaciones asignamos la entrada y salida de este dia actual ( habitual )
-        if (empleado.vacaciones.length > 0) {
-            // para evitar la entrada en todos los dias de vacaciones y que muestre de manera erroneo el horario
-            //  creamos una variable flag para marcar la entrada
+        // NOTA: Comentamos la verificación de vacaciones para que siempre se muestre el horario
+        // Si quieres ocultar el horario cuando hay vacaciones, descomenta este bloque
+        /*
+        if (empleado.vacaciones && Array.isArray(empleado.vacaciones) && empleado.vacaciones.length > 0) {
             let diavacaciones = false;
-            //  recorremos el horario vacaciones y asignamos la entrada y salida de este dia vacaciones
             empleado.vacaciones.forEach(vacaciones => {
-                // Seteamos en variables la fecha especifica del dia recorrido y la fecha actual para realizar la comprobacion
-                let fechavacaciones = moment(
-                    `${vacaciones.fecha}`,
-                    "YYYY-MM-DD HH:mm"
-                );
-                let actual = moment(`${dia}`, "YYYY-MM-DD HH:mm");
-                // Verificamos que sean iguales para asignar la entrada y salida
-                if (JSON.stringify(fechavacaciones) == JSON.stringify(actual)) {
+                let fechavacaciones = moment(vacaciones.fecha);
+                let actual = moment(dia);
+                
+                if (fechavacaciones.format("YYYY-MM-DD") === actual.format("YYYY-MM-DD")) {
                     horario_especial = undefined;
-                    // Si los dias coinciden marcamos el flag como true para no realice mas comprobaciones y marque mal el horario
                     diavacaciones = true;
                 }
             });
         }
+        */
         return horario_especial;
     }
 
@@ -623,7 +640,12 @@
 
     const abrirbusqueda = () => dialogobuscar.value = true
 
-    const openAppointmentDialog = () => {
+    const openAppointmentDialog = async () => {
+        // Si no hay servicios, cargarlos
+        if (!servicios.value || servicios.value.length === 0) {
+            await getServicios();
+        }
+        
         EventBus.emit("open_form", {
             fecha: dia_actual.value
         })
@@ -647,10 +669,12 @@
         immediate: true
     })
 
-    watch(tienda, (newValue, oldValue) => {
+    watch(tienda, async (newValue, oldValue) => {
         tienda.value = parseInt(tienda.value);
         evento.value.app_tienda_id = tienda.value;
-        (newValue) ? getData(tipo.value, newValue): null;
+        if (newValue) {
+            await getData(tipo.value, newValue);
+        }
     }, {
         immediate: true
     });

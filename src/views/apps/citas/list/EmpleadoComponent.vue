@@ -2,17 +2,26 @@
 
     <div>
 
-        <div :class="[type == 'week' ? 'week' : 'day', { 'hide-column': !horario }]" class="empleado-column">
+        <div :class="[type == 'week' ? 'week' : 'day', { 'hide-column': !props.horario || !Array.isArray(props.horario) || props.horario.length === 0 }]" class="empleado-column">
             <div class="empleado-nombre">
                 <v-chip :color="empleado.color" :to="{ path: `/guardar-empleado-app?id=${empleado.id}` }" small class="white--text">
                     {{ empleado.nombre }} - {{empleado.id}}
                 </v-chip>
             </div>
 
-            <template v-for="(intervalo, i) in intervalos">
+            <template v-for="(intervalo, i) in intervalos" :key="i">
 
-                <div @click="openForm(intervalo)" class="empleado-row" :style="{ height: interval_height + 'px' }" :ref="(el) => (div_intervalos[`${empleado.nombre}_${dia_actual}_${intervalo}`] = el)" :data-dia="dia_actual"
-                  :data-empleado="empleado.id" :data-hora="intervalo" @dragover.prevent @dragenter.prevent v-if="horario && empleadoHorario(`${empleado.nombre}_${dia_actual}_${intervalo}`)">
+                <div 
+                    @click="openForm(intervalo)" 
+                    class="empleado-row" 
+                    :style="{ height: interval_height + 'px' }" 
+                    :ref="(el) => { if (el) div_intervalos[`${empleado.nombre}_${dia_actual}_${intervalo}`] = el }" 
+                    :data-dia="dia_actual"
+                    :data-empleado="empleado.id" 
+                    :data-hora="intervalo" 
+                    @dragover.prevent 
+                    @dragenter.prevent 
+                    v-if="props.horario && Array.isArray(props.horario) && props.horario.length > 0 && empleadoHorario(`${empleado.nombre}_${dia_actual}_${intervalo}`)">
                     {{ intervalo }}
                 </div>
 
@@ -59,7 +68,7 @@
         intervalos: Array,
         empleado: Object,
         citas: Array,
-        horario: Object,
+        horario: [Array, Object], // Puede ser un array de horarios o undefined
         dia_actual: String,
         interval_height: Number,
         fechas: Array,
@@ -77,11 +86,17 @@
     const cita = ref({})
 
     const agregarHorarioPorEmpleado = (n, dia_actual) => {
+        console.log('agregarHorarioPorEmpleado llamado con:', n, 'fechas:', props.fechas);
         if (props.fechas && props.fechas.length > 0) {
             local_intervalos.value = {};
             return crearIntervalos(props.fechas, dia_actual);
         }
-        crearIntervalos(n, dia_actual);
+        if (n && Array.isArray(n) && n.length > 0) {
+            crearIntervalos(n, dia_actual);
+        } else {
+            console.log('No hay horario para crear intervalos');
+            local_intervalos.value = {};
+        }
     };
 
     // Methods
@@ -175,6 +190,13 @@
       };*/
 
     const crearIntervalos = (n, dia_actual) => {
+        if (!n || !Array.isArray(n) || n.length === 0) {
+            console.log('No hay horarios para crear intervalos');
+            return;
+        }
+        
+        console.log('Creando intervalos para:', n, 'día:', dia_actual);
+        
         n.forEach(element => {
             const start = moment(`${dia_actual} ${element.entrada}`, "YYYY-MM-DD HH:mm");
 
@@ -185,9 +207,10 @@
             const intervalos = _.range(diff / 30)
 
             intervalos.forEach((element, index) => {
-                const n = start.clone().add(index * 30, "minutes").format("YYYY-MM-DD_HH:mm");
-
-                const ref = `${props.empleado.nombre}_${n}`
+                const hora = start.clone().add(index * 30, "minutes").format("HH:mm");
+                
+                // Usar el mismo formato que en el template: empleado_nombre_dia_actual_HH:mm
+                const ref = `${props.empleado.nombre}_${dia_actual}_${hora}`
 
                 if (!local_intervalos.value[ref]) {
                     local_intervalos.value[ref] = []
@@ -196,9 +219,17 @@
                 local_intervalos.value[ref].push(ref)
             })
         });
+        
+        console.log('Intervalos creados:', local_intervalos.value);
     };
 
-    const empleadoHorario = ref => local_intervalos.value[ref]
+    const empleadoHorario = ref => {
+        const existe = !!local_intervalos.value[ref];
+        if (!existe && props.horario && Array.isArray(props.horario) && props.horario.length > 0) {
+            console.log(`Intervalo no encontrado para ref: ${ref}, intervalos disponibles:`, Object.keys(local_intervalos.value));
+        }
+        return existe;
+    }
 
     const openForm = (cita = null) => {
         if (cita && cita.id) {
@@ -260,8 +291,12 @@
     })
 
     watch(() => props.horario, newValue => {
-        if (newValue) {
+        console.log('Horario recibido en EmpleadoComponent:', newValue, 'para día:', props.dia_actual);
+        if (newValue && Array.isArray(newValue) && newValue.length > 0) {
             agregarHorarioPorEmpleado(newValue, props.dia_actual);
+        } else {
+            // Limpiar intervalos si no hay horario
+            local_intervalos.value = {};
         }
     }, {
         immediate: true

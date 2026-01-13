@@ -17,10 +17,12 @@ use App\ModelsApp\AppMascota;
 use App\ModelsApp\AppDireccionUsuario;
 use App\Models\DataMail;
 use App\Models\Config;
+use App\Models\User;
 use Illuminate\Http\Request;
 use App\Mail\NewPetDateMail;
 use Carbon\Carbon;
 use Mail;
+use Log;
 use Str;
 use App\Utils\StatusConstants;
 use Stripe\Stripe;
@@ -79,7 +81,7 @@ class EventAppController extends Controller
     $events = AppEvent::whereHas('empleado')->whereHas('usuario')
       ->whereBetween('start', [Carbon::parse($fecha)->startOfWeek(), Carbon::parse($fecha)->endOfWeek()])
       ->with('servicio', 'mascota')
-      ->whereIn('status', [StatusConstants::CONFIRMADA, StatusConstants::PAGADA])
+      ->whereIn('status', [StatusConstants::CONFIRMADA, StatusConstants::PAGADA, StatusConstants::PENDIENTE])
       ->get();
     return response()->json(AppEventoResource::collection($events), 200);
   }
@@ -89,6 +91,7 @@ class EventAppController extends Controller
 
     $empleados = AppEmpleado::with([
       'fecha',
+      'vacaciones',
       'horario' => function($query) use ($tienda_id){
         $query->where('app_tienda_id', $tienda_id)->orderBy('entrada', 'ASC');
       }
@@ -134,6 +137,9 @@ class EventAppController extends Controller
 
       $event = new AppEvent();
 
+      // Verificar si existe configuración, si no existe usar valor por defecto
+      $configActivo = $config && isset($config->activo) ? $config->activo : true;
+
       $event->fill([
         'app_empleado_id'     => $empleado['id'],
         'app_usuario_id'      => $request->app_usuario_id,
@@ -149,7 +155,7 @@ class EventAppController extends Controller
         'direccion_entrega'   => $request->direccion_entrega,
         'pago'                => $request->pago,
         'precio'              => $request->precio,
-        'status'              => $config->activo ? $status : StatusConstants::CONFIRMADA
+        'status'              => $configActivo ? $status : StatusConstants::CONFIRMADA
       ]);
 
       $usuario = AppUsuario::updateOrCreate(['id' => $request->app_usuario_id], ['observaciones' => $request->observacionesUsuario]);
@@ -165,6 +171,10 @@ class EventAppController extends Controller
       $saved_event->servicio()->sync($servicios);
 
       $date = null;
+      
+      // Obtener emails de administradores (rol = 1)
+      $administradores = User::where('role', 1)->pluck('email')->toArray();
+      
       // Comprobamos si esta confirmada la cita para envio de mail
       if($request->confirmada == '0'){
 
@@ -193,10 +203,30 @@ class EventAppController extends Controller
           'confirmada'   => 'SIN CONFIRMAR'
         ]);
 
-        if(!$config->activo){
-          Mail::to($userMail)
-            ->bcc('danielvkp@live.com')
-            ->send(new NewPetDateMail($dataMail));
+        // Enviar email siempre al cliente y a los administradores
+        try {
+          // Validar email del cliente antes de enviar
+          if (filter_var($userMail, FILTER_VALIDATE_EMAIL) === false) {
+            \Log::warning('Email del cliente inválido, no se enviará correo: ' . $userMail);
+          } else {
+            $mail = Mail::to($userMail);
+            if (!empty($administradores)) {
+              // Filtrar emails válidos antes de agregarlos al CC
+              $emailsValidos = array_filter($administradores, function($email) {
+                return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+              });
+              if (!empty($emailsValidos)) {
+                $mail->cc($emailsValidos);
+              }
+            }
+            $mail->send(new NewPetDateMail($dataMail));
+          }
+        } catch (\Exception $e) {
+          // Log del error pero no fallar la creación de la cita
+          \Log::error('Error enviando email de nueva cita (sin confirmar): ' . $e->getMessage(), [
+            'userMail' => $userMail,
+            'administradores' => $administradores ?? []
+          ]);
         }
       }
 
@@ -229,10 +259,30 @@ class EventAppController extends Controller
           'confirmada'   => 'CONFIRMADA'
         ]);
 
-        if(!$config->activo){
-          Mail::to($userMail)
-            ->bcc('danielvkp@live.com')
-            ->send(new NewPetDateMail($dataMail));
+        // Enviar email siempre al cliente y a los administradores
+        try {
+          // Validar email del cliente antes de enviar
+          if (filter_var($userMail, FILTER_VALIDATE_EMAIL) === false) {
+            \Log::warning('Email del cliente inválido, no se enviará correo: ' . $userMail);
+          } else {
+            $mail = Mail::to($userMail);
+            if (!empty($administradores)) {
+              // Filtrar emails válidos antes de agregarlos al CC
+              $emailsValidos = array_filter($administradores, function($email) {
+                return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+              });
+              if (!empty($emailsValidos)) {
+                $mail->cc($emailsValidos);
+              }
+            }
+            $mail->send(new NewPetDateMail($dataMail));
+          }
+        } catch (\Exception $e) {
+          // Log del error pero no fallar la creación de la cita
+          \Log::error('Error enviando email de nueva cita (confirmada): ' . $e->getMessage(), [
+            'userMail' => $userMail,
+            'administradores' => $administradores ?? []
+          ]);
         }
       }
 
@@ -240,7 +290,7 @@ class EventAppController extends Controller
         $existing_event->delete();
       }
 
-      if(!$config->activo){
+      if($config && !$config->activo){
         return response()->json([
           'app_event' => new AppEventoResource($saved_event)
         ], 200);
@@ -250,26 +300,46 @@ class EventAppController extends Controller
   }
 
   private function generatePayIntent(AppEvent $event){
-      $stripe = new \Stripe\StripeClient(config('services.stripe.secret'));
+      $stripeSecret = config('services.stripe.secret');
+      
+      // Verificar que la clave de Stripe esté configurada
+      if (empty($stripeSecret) || !is_string($stripeSecret)) {
+        // Si Stripe no está configurado, devolver la cita sin clientSecret
+        // Esto permite que la cita se cree sin pago
+        return [
+          'app_event' => new AppEventoResource($event)
+        ];
+      }
 
-      $event->load('usuario');
+      try {
+        $stripe = new \Stripe\StripeClient($stripeSecret);
 
-      $paymentIntent = $stripe->paymentIntents->create([
-          'amount'   => (double) $event->precio * 100,
-          'currency' => 'eur',
-          'automatic_payment_methods' => ['enabled' => true],
-          'metadata' => [
-              'app_event_id' => $event->id,
-              'nombre'       => $event->usuario->nombre,
-              'email'        => $event->usuario->email,
-              'telefono'     => $event->usuario->telefono
-          ]
-      ]);
+        $event->load('usuario');
 
-      return [
-        'clientSecret' => $paymentIntent->client_secret,
-        'app_event'    => new AppEventoResource($event)
-      ];
+        $paymentIntent = $stripe->paymentIntents->create([
+            'amount'   => (double) $event->precio * 100,
+            'currency' => 'eur',
+            'automatic_payment_methods' => ['enabled' => true],
+            'metadata' => [
+                'app_event_id' => $event->id,
+                'nombre'       => $event->usuario->nombre,
+                'email'        => $event->usuario->email,
+                'telefono'     => $event->usuario->telefono
+            ]
+        ]);
+
+        return [
+          'clientSecret' => $paymentIntent->client_secret,
+          'app_event'    => new AppEventoResource($event)
+        ];
+      } catch (\Exception $e) {
+        // Si hay un error con Stripe, devolver la cita sin clientSecret
+        \Log::error('Error al crear PaymentIntent de Stripe: ' . $e->getMessage());
+        return [
+          'app_event' => new AppEventoResource($event),
+          'error' => 'No se pudo procesar el pago. La cita se ha creado correctamente.'
+        ];
+      }
   }
 
   public function saveCitaApp(Request $request){

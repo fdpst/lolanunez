@@ -27,11 +27,28 @@ export const useDataMixin = () => {
             const response = await $api_app(`/getdata/${tipo}/${tienda}`, {
                 method: 'GET',
             })
-            empleados.value = response.empleados
-            servicios.value = response.servicios
-            clientes.value = response.clientes
+            empleados.value = response.empleados || []
+            clientes.value = response.clientes || []
+            
+            // Cargar todos los servicios desde el endpoint del menú de servicios
+            await getServicios();
         } catch (error) {
             console.error('Error obteniendo empleados:', error)
+        }
+    }
+
+    const getServicios = async () => {
+        try {
+            const response = await $api_app('/getservicios', {
+                method: 'GET',
+                params: {
+                    itemsPerPage: -1
+                }
+            })
+            servicios.value = response.data || response || []
+        } catch (error) {
+            console.error('Error obteniendo servicios:', error)
+            servicios.value = []
         }
     }
 
@@ -42,6 +59,7 @@ export const useDataMixin = () => {
         servicios,
         clientes,
         getTiendas,
-        getData
+        getData,
+        getServicios
     }
 }

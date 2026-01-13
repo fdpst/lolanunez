@@ -9,6 +9,7 @@ class HorarioEmpleadoResource extends JsonResource
     public function toArray($request){
       return [
         'id'            => $this->id,
+        'app_empleado_id' => $this->app_empleado_id,
         'app_tienda_id' => $this->app_tienda_id,
         'nombre_tienda' => $this->tienda ? $this->tienda->nombre : 'N/A',
         'dia'           => (int) $this->dia,
