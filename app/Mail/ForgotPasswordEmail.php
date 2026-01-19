@@ -22,6 +22,8 @@ class ForgotPasswordEmail extends Mailable
     }
 
     public function build(){
-        return $this->markdown('emails.user.recover_password', ['email' => $this->email, 'token' => $this->token])->subject('Recuperar Contraseña');
+        return $this->from(config('mail.from.address'), config('mail.from.name'))
+                    ->markdown('emails.user.recover_password', ['email' => $this->email, 'token' => $this->token])
+                    ->subject('Recuperar Contraseña');
     }
 }
