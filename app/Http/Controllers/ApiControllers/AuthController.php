@@ -5,7 +5,7 @@ namespace App\Http\Controllers\ApiControllers;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Models\User;
 use Carbon\Carbon;
@@ -51,7 +51,7 @@ class AuthController extends Controller
     return response()->json('logout', 200);
   }
 
-  public function resetPassword(Request $request) : RedirectResponse{
+  public function resetPassword(Request $request) : JsonResponse{
       $validator = Validator::make($request->all(), ['email' => 'required|email']);
 
       if ($validator->fails()) {
@@ -68,7 +68,17 @@ class AuthController extends Controller
 
       $status = Password::sendResetLink($request->only('email'));
 
-      return $status == Password::RESET_LINK_SENT ? back()->with('status', __($status)) : back()->withInput($request->only('email'))->withErrors(['email' => __($status)]);
+      if ($status == Password::RESET_LINK_SENT) {
+          return response()->json([
+              'status' => true, 
+              'message' => 'Se ha enviado un enlace de restablecimiento de contraseña a su correo electrónico.'
+          ], 200);
+      } else {
+          return response()->json([
+              'status' => false, 
+              'message' => 'No se pudo enviar el enlace de restablecimiento. Por favor, intente nuevamente.'
+          ], 400);
+      }
     }
 
 
