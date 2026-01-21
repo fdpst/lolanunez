@@ -79,8 +79,7 @@
 
 <script setup>
 import { ref, onMounted, watch } from "vue";
-import { $api } from "@core/utils";
-import { paginationMeta } from "@core/utils/helpers";
+import { $api, paginationMeta } from "@core/utils";
 import moment from "moment";
 
 // Data table options
