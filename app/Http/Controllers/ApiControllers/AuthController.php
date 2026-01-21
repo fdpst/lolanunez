@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Models\User;
+use App\Models\UserLog;
 use Carbon\Carbon;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Facades\Password;
@@ -34,6 +35,20 @@ class AuthController extends Controller
         'action' => 'manage',
         'subject' => 'all'
     ]];
+
+    // Registrar el acceso del usuario (solo si no existe un log para hoy)
+    $today = Carbon::today();
+    $existingLog = UserLog::where('user_id', $user->id)
+      ->whereDate('access_date', $today)
+      ->first();
+    
+    if (!$existingLog) {
+      UserLog::create([
+        'user_id' => $user->id,
+        'user_name' => $user->name,
+        'access_date' => $today,
+      ]);
+    }
 
     $response = [
       'userData'         => $user,

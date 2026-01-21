@@ -18,6 +18,10 @@ Route::post('/logout', [AuthController::class, 'logout']);
 Route::post('forgot-password', [AuthController::class, 'resetPassword']);
 Route::post('/update-password', [AuthController::class, 'updatePassword']);
 
+/*Logs de acceso*/
+use App\Http\Controllers\ApiControllers\LogController;
+Route::get('get-logs', [LogController::class, 'getLogs'])->middleware(['auth:sanctum', 'hasrole:1']);
+
 /*Rutas usuario*/
 Route::get('get-users', [UserController::class, 'getUsers'])->middleware(['auth:sanctum', 'hasrole:1']);
 Route::get('get-user/{user_id}', [UserController::class, 'getUser'])->middleware(['auth:sanctum', 'hasrole:1']);
