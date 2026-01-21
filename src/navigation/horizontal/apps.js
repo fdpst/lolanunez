@@ -78,6 +78,14 @@ export default [{
           { title: 'Informe', to: 'apps-bills-report' },
         ],
   },
+  {
+      title: 'Logs',
+      icon: {
+          icon: 'ri-file-list-line'
+      },
+      auth: [1],
+      to: 'apps-logs-list',
+  },
     /*{
       title: 'eCommerce',
       icon: { icon: 'ri-shopping-cart-2-line' },

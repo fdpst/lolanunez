@@ -44,7 +44,7 @@ import Paso2FechaHorario from '@/views/apps/solicitar-cita/Paso2FechaHorario.vue
 import Paso3Formulario from '@/views/apps/solicitar-cita/Paso3Formulario.vue'
 import Paso4Resumen from '@/views/apps/solicitar-cita/Paso4Resumen.vue'
 
-definePage({ meta: { layout: 'blank' } })
+definePage({ meta: { layout: 'blank', public: true } })
 
 const pasoActual = ref(1)
 const formData = ref({
